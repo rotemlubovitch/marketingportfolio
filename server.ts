@@ -1,0 +1,148 @@
+import express from "express";
+import path from "path";
+import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const app = express();
+const PORT = 3000;
+
+// Lazy initialization check of GEMINI_API_KEY
+const getAiClient = () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY environment variable is not defined.");
+  }
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
+};
+
+app.use(express.json());
+
+// API route for Chat
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { messages } = req.body;
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: "Invalid messages format. Expected array." });
+    }
+
+    const ai = getAiClient();
+
+    // Map messages to Gemini API format
+    const contents = messages.map((m: any) => {
+      const role = m.role === "user" ? "user" : "model";
+      return {
+        role,
+        parts: [{ text: m.content }]
+      };
+    });
+
+    const systemInstruction = `You are the AI Assistant for Rotem Lubovitch, a highly ambitious and skilled 16-year-old marketing intern, content creator, and high school senior based in Cupertino, California (Silicon Valley). She attends Homestead High School and has an outstanding GPA.
+
+Your objective is to represent Rotem's experience, interests, projects, and ambitions to recruiters, potential clients, and visitors in a friendly, professional, energetic, and helpful manner. Refer to Rotem in the third person ("Rotem worked on...", "She is..."). Keep responses concise, structured, and visually engaging (using markdown, bullet points, or paragraphs where appropriate).
+
+Key facts about Rotem:
+1. Current Internships / Work Experience:
+   - Social Media Intern at "The Imperfectionist" (Feb 2026–Present): Designing social graphics, running reels/shorts, and analyzing engagement.
+   - Digital Marketing Intern at "Rose Cart" (Jan–Apr 2026): Crafted Valentine's campaigns, designed bouquet petal cards and grids, analyzed customer feedback.
+   - Aesthetic Intern at "Graystar Design" (Dec 2024 & Oct 2025): Layout formatting, brand aesthetics curation, visual moodboard design.
+   - Political Canvasser (Aug–Nov 2024): Canvassed face-to-face, tracked registered voters using PDI (Political Data Inc.) platform.
+   - Promotional Intern at "Wayground" (Jun–Aug 2024): Worked on gamified learning promotional concepts, short-form video creation.
+   - Marketing Committee at "FBLA x Allcove" (Feb–Mar 2024): Promoted teen mental health outreach services with Allcove.
+2. Education & Honors:
+   - Senior at Homestead High School, Cupertino, CA.
+   - Member of the National Honor Society (NHS) with 45+ volunteer hours.
+   - Board Member of the Sunnyvale Library Teen Advisory Board (organizing monthly teen events and reading challenges).
+3. Technical & Creative Skills:
+   - Tools: Canva, Adobe Illustrator, Wix, Google Sheets, PDI, Scratch.
+   - Specialties: Instagram/TikTok marketing, Short-form Video, Carousel Design, Brand Curation, Client Communication, Event Planning, Cross-Cultural Collaboration.
+4. Fun Hobbies:
+   - Fantasy novels, Formula 1 racing, Color Guard, volunteering with Grassroots Ecology, and learning French.
+5. Action Items for Visitors:
+   - Visitors can download her formal single-page PDF Resume by scrolling to the 'About' section on the page and clicking 'Download Resume'.
+   - Visitors can contact her directly via email at rotem.lubovitch@gmail.com, or fill out the contact form at the bottom of the page (Navbar > Contact).
+
+Always remain enthusiastic, polite, and eager to help. Keep answers brief (typically 1-3 short paragraphs or clean lists) so it fits nicely inside a compact corner chat widget.`;
+
+    let generatedText = "";
+    const modelsToTry = ["gemini-2.5-flash", "gemini-1.5-flash"];
+    let lastError: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        console.log(`Attempting content generation using model: ${model}`);
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+          }
+        });
+        if (response && response.text) {
+          generatedText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        console.warn(`Model ${model} failed:`, err.message || err);
+        lastError = err;
+      }
+    }
+
+    if (!generatedText) {
+      console.warn("All Gemini models failed or returned empty. Applying local smart responder.");
+      const userQuery = contents[contents.length - 1]?.parts?.[0]?.text?.toLowerCase() || "";
+
+      if (userQuery.includes("resume") || userQuery.includes("cv") || userQuery.includes("download")) {
+        generatedText = "You can download Rotem's formal single-page resume by scrolling down to the 'About' section on the main page and clicking the 'Download Resume' button! Let me know if you want to know more about her experience.";
+      } else if (userQuery.includes("contact") || userQuery.includes("email") || userQuery.includes("reach") || userQuery.includes("touch")) {
+        generatedText = "You can contact Rotem directly via email at rotem.lubovitch@gmail.com, or scroll to the bottom of the page to fill out the contact form. She is looking forward to connecting with you!";
+      } else if (userQuery.includes("intern") || userQuery.includes("work") || userQuery.includes("job") || userQuery.includes("experience") || userQuery.includes("rose cart") || userQuery.includes("imperfectionist")) {
+        generatedText = "Rotem has completed and is currently pursuing several impressive internships:\n\n• **Social Media Intern** at *The Imperfectionist* (Feb 2026–Present): Designing engaging graphics, Reels/Shorts, and managing brand aesthetics.\n• **Digital Marketing Intern** at *Rose Cart* (Jan–Apr 2026): Crafted successful Valentine's Day marketing campaigns, designed bouquet grids, and handled client communications.\n• **Aesthetic Intern** at *Graystar Design* (Dec 2024 & Oct 2025): Layout formatting and curation of design aesthetics.\n• **Political Canvasser** (Aug–Nov 2024): Done face-to-face voter registration & outreach.";
+      } else if (userQuery.includes("school") || userQuery.includes("education") || userQuery.includes("gpa") || userQuery.includes("homestead")) {
+        generatedText = "Rotem is a senior at Homestead High School in Cupertino, California. She is an honors student, a member of the National Honor Society (NHS), and serves on the Sunnyvale Library Teen Advisory Board!";
+      } else if (userQuery.includes("skill") || userQuery.includes("canva") || userQuery.includes("tool")) {
+        generatedText = "Rotem is highly skilled in modern creative and marketing tools. She is proficient with Canva, Adobe Illustrator, Wix, Google Sheets, PDI, and Scratch. Her expertise includes social media strategy (Instagram, TikTok, YouTube Shorts), visual curation, and client communications!";
+      } else {
+        generatedText = "Hi! The online AI service is currently experiencing high demand, but I'm here as Rotem's smart offline assistant. 🌟\n\nRotem is a 16-year-old marketing intern, Homestead High senior, and a highly creative content designer based in Cupertino.\n\nFeel free to ask about her:\n• **Work Experience** & Internships\n• **Education** and Honors\n• **Skills** and Tools\n• How to **Contact** or find her **Resume**";
+      }
+    }
+
+    res.json({ text: generatedText });
+  } catch (error: any) {
+    console.error("Gemini API Error:", error);
+    res.status(500).json({ error: error.message || "Failed to generate chat response" });
+  }
+});
+
+// Vite middleware setup
+async function start() {
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+start();

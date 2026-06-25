@@ -1,0 +1,6 @@
+{
+  "name": "Rotem Lubovitch Portfolio",
+  "description": "Personal marketing portfolio website for Rotem Lubovitch, a 16-year-old marketing intern and content creator based in Cupertino, CA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
