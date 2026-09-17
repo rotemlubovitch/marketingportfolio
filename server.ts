@@ -27,6 +27,130 @@ const getAiClient = () => {
 
 app.use(express.json());
 
+// API route for Contact Form submission
+let customFormSubmitToken = process.env.FORMSUBMIT_TOKEN || "";
+let lastActivationSentAt = 0;
+
+app.get("/api/contact/status", (req, res) => {
+  res.json({
+    recipientEmail: "rotem.lubovitch@gmail.com",
+    hasCustomToken: Boolean(customFormSubmitToken),
+    customTokenPreview: customFormSubmitToken ? `${customFormSubmitToken.slice(0, 6)}...` : null,
+    lastActivationSentAt
+  });
+});
+
+app.post("/api/contact/set-token", (req, res) => {
+  const { token } = req.body;
+  if (typeof token === "string") {
+    customFormSubmitToken = token.trim();
+    console.log(`[Contact Form] Custom FormSubmit token updated: ${customFormSubmitToken ? "set" : "cleared"}`);
+    return res.json({ success: true, token: customFormSubmitToken });
+  }
+  return res.status(400).json({ error: "Invalid token" });
+});
+
+app.post("/api/contact/resend-activation", async (req, res) => {
+  try {
+    const now = Date.now();
+    // 20 second cooldown to prevent token invalidation loops
+    if (now - lastActivationSentAt < 20000) {
+      const waitSec = Math.ceil((20000 - (now - lastActivationSentAt)) / 1000);
+      return res.status(429).json({
+        error: `Please wait ${waitSec} seconds before requesting another activation email, so previous tokens aren't invalidated.`,
+        cooldownRemaining: waitSec
+      });
+    }
+
+    const recipientEmail = "rotem.lubovitch@gmail.com";
+    const appUrl = process.env.APP_URL || "https://ais-dev-saf36olwlu65qki5h35uhf-406068521101.us-west1.run.app";
+
+    console.log(`[Contact Form] Dispatching single fresh activation email to ${recipientEmail}...`);
+
+    const response = await fetch(`https://formsubmit.co/ajax/${recipientEmail}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": appUrl,
+        "Referer": `${appUrl}/`,
+      },
+      body: JSON.stringify({
+        name: "Rotem Portfolio Activation",
+        email: recipientEmail,
+        _replyto: recipientEmail,
+        message: "Activation handshake request for Rotem Lubovitch portfolio contact form.",
+        _subject: "Activate Rotem Lubovitch Portfolio Form",
+        _template: "table",
+        _captcha: "false"
+      })
+    });
+
+    const data = await response.json().catch(() => ({}));
+    lastActivationSentAt = Date.now();
+
+    return res.json({
+      success: true,
+      message: data.message || "Fresh activation email sent to rotem.lubovitch@gmail.com.",
+      sentAt: lastActivationSentAt
+    });
+  } catch (error: any) {
+    console.error("[Contact Form] Failed to resend activation:", error);
+    return res.status(500).json({ error: error.message || "Failed to trigger activation." });
+  }
+});
+
+app.post("/api/contact", async (req, res) => {
+  try {
+    const { name, email, message } = req.body;
+    if (!name || !email || !message) {
+      return res.status(400).json({ error: "Name, email, and message are all required." });
+    }
+
+    console.log(`[Contact Form] Received submission from "${name}" <${email}>`);
+
+    const target = customFormSubmitToken || "rotem.lubovitch@gmail.com";
+    const appUrl = process.env.APP_URL || "https://ais-dev-saf36olwlu65qki5h35uhf-406068521101.us-west1.run.app";
+
+    // Forward to FormSubmit API
+    const response = await fetch(`https://formsubmit.co/ajax/${target}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": appUrl,
+        "Referer": `${appUrl}/`,
+      },
+      body: JSON.stringify({
+        name,
+        email,
+        _replyto: email,
+        message,
+        _subject: `New Portfolio Message from ${name} (${email})`,
+        _template: "table",
+        _captcha: "false"
+      })
+    });
+
+    const data = await response.json().catch(() => ({}));
+    console.log("[Contact Form] FormSubmit response:", data);
+
+    const messageStr = typeof data.message === "string" ? data.message : "";
+    const isActivation = messageStr.toLowerCase().includes("activation");
+
+    return res.json({
+      success: true,
+      activationNeeded: isActivation,
+      message: messageStr || "Message dispatched successfully!"
+    });
+  } catch (error: any) {
+    console.error("[Contact Form] Failed to process message:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to process message."
+    });
+  }
+});
+
 // API route for Chat
 app.post("/api/chat", async (req, res) => {
   try {
