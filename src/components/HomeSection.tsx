@@ -127,7 +127,7 @@ export default function HomeSection({ onScrollToSection }: HomeSectionProps) {
 
           {/* Bio sentence */}
           <p id="hero-bio" className="font-sans text-lg md:text-2xl text-brand-navy/90 font-light max-w-2xl leading-relaxed mb-10">
-            I'm Rotem — a 16-year-old marketing intern turning small businesses into scroll-stoppers.
+            I'm Rotem — a 17-year-old marketing intern turning small businesses into scroll-stoppers.
           </p>
 
           {/* Actions */}

@@ -105,7 +105,7 @@ export default function AboutSection() {
           <div className="lg:col-span-8">
             <AnimatedSection id="about-bio-content">
               <h2 className="font-serif font-bold text-3xl md:text-4xl text-brand-navy tracking-tight leading-tight mb-6">
-                Hi, I'm Rotem — a senior at Homestead High School with an outstanding GPA and a genuine obsession with how brands communicate.
+                Hi, I'm Rotem — a 17-year-old senior at Homestead High School with an outstanding GPA and a genuine obsession with how brands communicate.
               </h2>
               
               <div className="space-y-6 text-brand-navy/85 font-sans font-light text-base md:text-lg leading-relaxed">

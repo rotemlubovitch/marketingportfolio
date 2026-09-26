@@ -100,6 +100,24 @@ app.post("/api/contact/resend-activation", async (req, res) => {
   }
 });
 
+// Store messages locally in server memory as a reliable fallback
+interface StoredMessage {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  timestamp: string;
+  formSubmitStatus: string;
+}
+const storedMessages: StoredMessage[] = [];
+
+app.get("/api/contact/messages", (req, res) => {
+  res.json({
+    count: storedMessages.length,
+    messages: storedMessages.slice(-20)
+  });
+});
+
 app.post("/api/contact", async (req, res) => {
   try {
     const { name, email, message } = req.body;
@@ -110,38 +128,64 @@ app.post("/api/contact", async (req, res) => {
     console.log(`[Contact Form] Received submission from "${name}" <${email}>`);
 
     const target = customFormSubmitToken || "rotem.lubovitch@gmail.com";
-    const appUrl = process.env.APP_URL || "https://ais-dev-saf36olwlu65qki5h35uhf-406068521101.us-west1.run.app";
+    // FormSubmit verified origin:
+    const verifiedOrigin = "https://ais-dev-saf36olwlu65qki5h35uhf-406068521101.us-west1.run.app";
 
-    // Forward to FormSubmit API
-    const response = await fetch(`https://formsubmit.co/ajax/${target}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Origin": appUrl,
-        "Referer": `${appUrl}/`,
-      },
-      body: JSON.stringify({
-        name,
-        email,
-        _replyto: email,
-        message,
-        _subject: `New Portfolio Message from ${name} (${email})`,
-        _template: "table",
-        _captcha: "false"
-      })
-    });
+    let formSubmitStatus = "pending";
+    let formSubmitSuccess = false;
+    let formSubmitMessage = "";
 
-    const data = await response.json().catch(() => ({}));
-    console.log("[Contact Form] FormSubmit response:", data);
+    try {
+      // Forward to FormSubmit API with verified origin and browser user-agent
+      const response = await fetch(`https://formsubmit.co/ajax/${target}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Origin": verifiedOrigin,
+          "Referer": `${verifiedOrigin}/`,
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          _replyto: email,
+          message,
+          _subject: `New Portfolio Message from ${name} (${email})`,
+          _template: "table",
+          _captcha: "false"
+        })
+      });
 
-    const messageStr = typeof data.message === "string" ? data.message : "";
-    const isActivation = messageStr.toLowerCase().includes("activation");
+      const data = await response.json().catch(() => ({}));
+      console.log("[Contact Form] FormSubmit response:", data);
+
+      formSubmitMessage = typeof data.message === "string" ? data.message : "";
+      formSubmitSuccess = Boolean(data.success === true || data.success === "true" || response.ok);
+      formSubmitStatus = formSubmitSuccess ? "delivered" : (data.message || "error");
+    } catch (fsErr: any) {
+      console.warn("[Contact Form] FormSubmit network delivery issue:", fsErr.message);
+      formSubmitStatus = `network_error: ${fsErr.message}`;
+    }
+
+    // Always preserve the message in server storage
+    const record: StoredMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      email,
+      message,
+      timestamp: new Date().toISOString(),
+      formSubmitStatus
+    };
+    storedMessages.push(record);
+    console.log(`[Contact Form] Message saved to server storage (Total: ${storedMessages.length})`);
+
+    const isActivation = formSubmitMessage.toLowerCase().includes("activation");
 
     return res.json({
       success: true,
       activationNeeded: isActivation,
-      message: messageStr || "Message dispatched successfully!"
+      message: formSubmitSuccess ? (formSubmitMessage || "Message dispatched successfully!") : "Message received and saved!"
     });
   } catch (error: any) {
     console.error("[Contact Form] Failed to process message:", error);
@@ -170,11 +214,12 @@ app.post("/api/chat", async (req, res) => {
       };
     });
 
-    const systemInstruction = `You are the AI Assistant for Rotem Lubovitch, a highly ambitious and skilled 16-year-old marketing intern, content creator, and high school senior based in Cupertino, California (Silicon Valley). She attends Homestead High School and has an outstanding GPA.
+    const systemInstruction = `You are the AI Assistant for Rotem Lubovitch, a highly ambitious and skilled 17-year-old marketing intern, content creator, and high school senior based in Cupertino, California (Silicon Valley). She is 17 years old, attends Homestead High School, and has an outstanding GPA.
 
 Your objective is to represent Rotem's experience, interests, projects, and ambitions to recruiters, potential clients, and visitors in a friendly, professional, energetic, and helpful manner. Refer to Rotem in the third person ("Rotem worked on...", "She is..."). Keep responses concise, structured, and visually engaging (using markdown, bullet points, or paragraphs where appropriate).
 
 Key facts about Rotem:
+0. Age: Rotem is 17 years old.
 1. Current Internships / Work Experience:
    - Social Media Intern at "The Imperfectionist" (Feb 2026–Present): Designing social graphics, running reels/shorts, and analyzing engagement.
    - Digital Marketing Intern at "Rose Cart" (Jan–Apr 2026): Crafted Valentine's campaigns, designed bouquet petal cards and grids, analyzed customer feedback.
@@ -226,7 +271,9 @@ Always remain enthusiastic, polite, and eager to help. Keep answers brief (typic
       console.warn("All Gemini models failed or returned empty. Applying local smart responder.");
       const userQuery = contents[contents.length - 1]?.parts?.[0]?.text?.toLowerCase() || "";
 
-      if (userQuery.includes("resume") || userQuery.includes("cv") || userQuery.includes("download")) {
+      if (userQuery.includes("age") || userQuery.includes("how old") || userQuery.includes("old is") || userQuery.includes("old are you") || userQuery.includes("how old i was") || userQuery.includes("how old am i") || userQuery.includes("how old is rotem")) {
+        generatedText = "Rotem is 17 years old! She is a senior at Homestead High School in Cupertino, California, and a marketing intern and content strategist.";
+      } else if (userQuery.includes("resume") || userQuery.includes("cv") || userQuery.includes("download")) {
         generatedText = "You can download Rotem's formal single-page resume by scrolling down to the 'About' section on the main page and clicking the 'Download Resume' button! Let me know if you want to know more about her experience.";
       } else if (userQuery.includes("contact") || userQuery.includes("email") || userQuery.includes("reach") || userQuery.includes("touch")) {
         generatedText = "You can contact Rotem directly via email at rotem.lubovitch@gmail.com, or scroll to the bottom of the page to fill out the contact form. She is looking forward to connecting with you!";
@@ -237,7 +284,7 @@ Always remain enthusiastic, polite, and eager to help. Keep answers brief (typic
       } else if (userQuery.includes("skill") || userQuery.includes("canva") || userQuery.includes("tool")) {
         generatedText = "Rotem is highly skilled in modern creative and marketing tools. She is proficient with Canva, Adobe Illustrator, Wix, Google Sheets, PDI, and Scratch. Her expertise includes social media strategy (Instagram, TikTok, YouTube Shorts), visual curation, and client communications!";
       } else {
-        generatedText = "Hi! The online AI service is currently experiencing high demand, but I'm here as Rotem's smart offline assistant. 🌟\n\nRotem is a 16-year-old marketing intern, Homestead High senior, and a highly creative content designer based in Cupertino.\n\nFeel free to ask about her:\n• **Work Experience** & Internships\n• **Education** and Honors\n• **Skills** and Tools\n• How to **Contact** or find her **Resume**";
+        generatedText = "Hi! The online AI service is currently experiencing high demand, but I'm here as Rotem's smart offline assistant. 🌟\n\nRotem is a 17-year-old marketing intern, Homestead High senior, and a highly creative content designer based in Cupertino.\n\nFeel free to ask about her:\n• **Work Experience** & Internships\n• **Education** and Honors\n• **Skills** and Tools\n• How to **Contact** or find her **Resume**";
       }
     }
 

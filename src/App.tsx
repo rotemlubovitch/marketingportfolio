@@ -68,7 +68,7 @@ export default function App() {
               Rotem Lubovitch
             </span>
             <p className="font-mono text-[9px] tracking-widest text-brand-sage uppercase mt-1 font-medium">
-              Cupertino, CA · 16-Year-Old Marketer
+              Cupertino, CA · 17-Year-Old Marketer
             </p>
           </div>
 
